@@ -7,20 +7,32 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QByteArray, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from db.db_utils import ConfigReader
+from sqlalchemy import select
+from db.models import User
+from db.db_utils import DbUtil
+import asyncio
 from common.d_logger import Logs
-
+from common.async_helper import AsyncHelper
 
 logger = Logs().get_logger("main")
 
 
 class LoginWidget(QWidget):
     start_main = Signal(str)
+    start_signal = Signal(str)
+    done_signal = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
+        self.db_util = DbUtil()
+        # Create AsyncHelper with a dictionary of async operations
+        self.async_helper = AsyncHelper(self, {
+            "test_connection": self.test_connection,
+            "verify_user": self.verify_user,
+            "insert_user": self.insert_user_info,
+            "query_password": self.query_user_password
+        })
         self.initializeUI()
 
     def initializeUI(self):
@@ -31,33 +43,104 @@ class LoginWidget(QWidget):
         self.setupWindow()
 
     def createConnection(self):
-        """Set up the connection to the database.
-        Check for the tables needed."""
-        config = ConfigReader()
-        database = QSqlDatabase.addDatabase("QPSQL")
-        database.setHostName(config.get_options("Host"))
-        database.setPort(int(config.get_options("Port")))
-        database.setUserName(config.get_options("User"))
-        database.setPassword(config.get_options("Password"))
-        database.setDatabaseName(config.get_options("Database"))
-        if not database.open():
+        """Set up the connection to the database."""
+        try:
+            # Create AsyncHelper for login operations
+            self.async_helper = AsyncHelper(self, self.test_connection)
+            self.async_helper.on_worker_started("test_connection")
+            logger.info("Database connected successfully")
+        except Exception as e:
             logger.error("Unable to Connect.")
-            logger.error(database.lastError())
-            sys.exit(1)  # Error code 1 - signifies error
-        else:
-            logger.debug("Connected")
+            logger.error(f"{e}")
+            QMessageBox.critical(None, "Error", "Unable to connect to database")
+            sys.exit(1)
 
-        # Check if the tables we need exist in the database
-        # tables_needed = {"users"}
-        # tables_not_found = tables_needed - set(database.tables())
-        # if tables_not_found:
-        tables = database.tables()
-        if "users" not in tables:
-            QMessageBox.critical(None,
-                                 "Error",
-                                 f"""<p>The following tables are missing
-                                  from the database: {tables}</p>""")
-            sys.exit(1)  # Error code 1 - signifies error
+    async def test_connection(self):
+            """Test database connection by querying users table"""
+            try:
+                async with self.db_util.session() as session:
+                    stmt = select(User)
+                    result = await session.execute(stmt)
+                    # Just checking if we can execute a query
+                    result.first()
+                # Emit done signal after successful completion
+                self.done_signal.emit("test_connection")
+            except Exception as e:
+                logger.error(f"Test connection failed: {e}")
+                raise
+
+    async def query_user_password(self, user_name):
+        """Query user password using SQLAlchemy"""
+        try:
+            async with self.db_util.session() as session:
+                stmt = select(User.user_password).where(User.user_name == user_name)
+                result = await session.execute(stmt)
+                row = result.first()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Query password failed: {e}")
+            return None
+
+    async def insert_user_info(self, user_name, hashed_user_pw):
+        """Insert or update user info using SQLAlchemy"""
+        try:
+            async with self.db_util.session() as session:
+                # Check if user exists
+                stmt = select(User).where(User.user_name == user_name)
+                result = await session.execute(stmt)
+                user = result.scalar_one_or_none()
+
+                if user:
+                    # Update existing user
+                    user.user_password = hashed_user_pw
+                else:
+                    # Create new user
+                    user = User(
+                        user_name=user_name,
+                        user_password=hashed_user_pw
+                    )
+                    session.add(user)
+                
+                await session.commit()
+                logger.debug("User info inserted!")
+                self.done_signal.emit("insert_user")
+                return True
+        except Exception as e:
+            logger.debug(f"User info not inserted: {e}")
+            QMessageBox.warning(
+                self,
+                "Warning",
+                "User name or password is improper!!",
+                QMessageBox.Close
+            )
+            self.done_signal.emit("insert_user")
+            return False
+
+    async def verify_user(self, password, user_name):
+        """Verify user credentials"""
+        try:
+            # Emit signal before querying password
+            self.start_signal.emit("query_password")
+            stored_pw = await self.query_user_password(user_name)
+            # Emit done signal after query
+            self.done_signal.emit("query_password")
+            
+            if stored_pw is None:
+                return False
+
+            # Convert stored password to bytes if needed
+            if isinstance(stored_pw, (QByteArray, bytes)):
+                stored_pw_bytes = stored_pw.data() if isinstance(stored_pw, QByteArray) else stored_pw
+            else:
+                stored_pw_bytes = stored_pw
+
+            result = self.verify_password(password, stored_pw_bytes)
+            self.done_signal.emit("verify_user")
+            return result
+        except Exception as e:
+            logger.error(f"Verification failed: {e}")
+            self.done_signal.emit("verify_user")
+            return False
 
     def setupWindow(self):
         """Set up the widgets for the login GUI."""
@@ -105,43 +188,6 @@ class LoginWidget(QWidget):
 
         self.setLayout(main_v_box)
 
-    def query_user_password(self, user_name):
-        query = QSqlQuery()
-        query.prepare("SELECT user_password FROM users WHERE user_name = ?")
-        query.addBindValue(user_name)
-        query.exec()
-
-        result = None
-        if query.next():
-            result = query.value(0)
-            logger.debug("Got a password!")
-        else:
-            logger.debug("No password found")
-
-        return result
-
-    def insert_user_info(self, user_name, hashed_user_pw):
-        query = QSqlQuery()
-        pw = QByteArray(hashed_user_pw)
-        logger.debug(f"{user_name}, password:{pw}")
-        query.prepare("""INSERT INTO users (user_name, user_password) VALUES ($1, $2)
-                            ON CONFLICT (user_name)
-                            DO
-                                UPDATE SET user_name = $1, user_password = $2""")
-        query.addBindValue(user_name)
-        # postgresql only accepts hexadecimal format
-        query.addBindValue(pw)
-
-        if query.exec():
-            logger.debug("User info inserted!")
-        else:
-            QMessageBox.warning(self,
-                                "Warning",
-                                "User name or password is improper!!",
-                                QMessageBox.Close)
-            logger.debug("User info not inserted!")
-            logger.debug(f"{query.lastError()}")
-
     def encrypt_password(self, password):
         # Generate a salt and hash the password
         salt = bcrypt.gensalt()
@@ -154,36 +200,20 @@ class LoginWidget(QWidget):
         # Compare the hashed input password with the stored password
         return hashed_input_password == stored_password
 
-    def verify_user(self, password, user_name):
-        # The following code converts QByteArray to PyBtye(bytes) format
-        # stored_pwd: type is QByteArray hex format
-        stored_pw: QByteArray = self.query_user_password(user_name)
-        if stored_pw is None:
-            return False
-
-        # convert QByteArray to bytes
-        stored_pw_bytes: bytes = stored_pw.data()
-        password_verified = self.verify_password(password, stored_pw_bytes)
-        return password_verified
-
     def process_login(self, change_pw=False):
-        """
-        Check the user's information. Close the login window if a match
-        is found, and open the inventory manager window.
-
-        :return:
-        """
-        # Collect information that the user entered
+        """Check the user's information."""
         user_name = self.user_entry.text()
         password = self.password_entry.text()
 
-        password_verified = self.verify_user(password, user_name)
+        # Use async_helper with proper signals
+        self.start_signal.emit("verify_user")
+        password_verified = self.async_helper.run_sync(self.verify_user(password, user_name))
+        
         if password_verified:
             self.close()
             if change_pw:
                 self.register_password_dialog(user_name)
             else:
-                # Open the SQL management application
                 sleep(0.5)  # Pause slightly before showing the parent window
                 self.start_main.emit(user_name)
                 logger.debug("Passed!!!")
@@ -236,22 +266,33 @@ class LoginWidget(QWidget):
         self.user_input_dialog.show()
 
     def accept_user_info(self):
-        """Verify that the user's passwords match. If so, save them user's
-        info to DB and display the login window."""
-        user_name_text = self.user_name.text()
+        """Verify and save user info"""
+        user_name_text = (
+            self.user_name.text() 
+            if isinstance(self.user_name, QLineEdit) 
+            else self.user_name.text
+        )
         pw_text = self.new_password.text()
         confirm_text = self.confirm_password.text()
+        
         if pw_text != confirm_text:
-            QMessageBox.warning(self,
-                                "Error Message",
-                                "The passwords you entered do not match. Please try again.",
-                                QMessageBox.Close)
+            QMessageBox.warning(
+                self,
+                "Error Message",
+                "The passwords you entered do not match. Please try again.",
+                QMessageBox.Close
+            )
         else:
             # If the passwords match, encrypt and save it to the db
             hashed_pw = self.encrypt_password(pw_text)
-            self.insert_user_info(user_name_text, hashed_pw)
-        self.user_input_dialog.close()
-        self.show()
+            # Use async_helper instead of raw loop
+            self.start_signal.emit("insert_user")
+            success = self.async_helper.run_sync(
+                self.insert_user_info(user_name_text, hashed_pw)
+            )
+            if success:
+                self.user_input_dialog.close()
+                self.show()
 
 
 if __name__ == '__main__':

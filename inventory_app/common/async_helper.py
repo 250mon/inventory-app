@@ -2,6 +2,7 @@ import asyncio
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal, Slot, QEvent
 from common.d_logger import Logs
+from db.db_utils import DbUtil
 
 logger = Logs().get_logger("main")
 
@@ -29,6 +30,8 @@ class AsyncHelper(QObject):
         self.reenter_qt = self.ReenterQtObject()
         self.entry = entry
         self.loop = asyncio.new_event_loop()
+        # set the event loop for DbUtil
+        DbUtil.set_loop(self.loop)
         self.done = {}
 
         self.worker = worker

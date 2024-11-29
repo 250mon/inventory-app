@@ -1,9 +1,12 @@
 [tool.poetry]
-name = "ims3"
+name = "inventory-app"
 version = "0.1.0"
 description = ""
 authors = ["250mon <lambki@naver.com>"]
 readme = "README.md"
+packages = [
+    { include = "inventory_app" },
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
@@ -13,6 +16,8 @@ sqlalchemy = "^2.0.36"
 bcrypt = "^4.2.1"
 asyncpg = "^0.30.0"
 pyyaml = "^6.0.2"
+alembic = "^1.14.0"
+psycopg2-binary = "^2.9.10"
 
 
 [build-system]

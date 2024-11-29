@@ -290,21 +290,24 @@ class DataModel(PandasModel):
         :return:
         """
 
-    def drop_rows(self, indexes: List[QModelIndex or int]):
+    def drop_rows(self, rows: List[QModelIndex or int]):
         """
         Drop rows from model_df
         :param indexes:
         :return:
         """
-        logger.debug(f"dropping... indexes({indexes})")
-        if isinstance(indexes[0], QModelIndex):
-            indexes = [i.row() for i in indexes]
+        # if rows are QModelIndex, convert them to row numbers
+        if isinstance(rows[0], QModelIndex):
+            rows = [i.row() for i in rows]
+            logger.debug(f"dropping... rows({rows})")
+        else:
+            logger.debug(f"dropping... rows({rows})")
 
-        self.beginRemoveRows(QModelIndex(), indexes[0], indexes[-1])
-        self.model_df.drop(pd.Index(indexes), inplace=True)
+        self.beginRemoveRows(QModelIndex(), rows[0], rows[-1])
+        self.model_df.drop(pd.Index(rows), inplace=True)
         self.endRemoveRows()
 
-        logger.debug(f"model_df dropped rows {indexes}")
+        logger.debug(f"model_df dropped rows {rows}")
 
     def diff_row(self, index: QModelIndex) -> bool:
         """

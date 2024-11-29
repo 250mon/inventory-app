@@ -84,8 +84,8 @@ class TrModel(DataModel):
         Override method to use selected_sku_id and begin_/end_ timestamp
         :return:
         """
-        # end day needs to be added 1 day otherwise query results only includes those thata
-        # were created until the day 00h 00mm 00sec
+        # end day needs to be added 1 day otherwise query results only includes those data
+        # that were created until the day 00h 00mm 00sec
         logger.debug(f"downloading data from DB")
         kwargs = {'sku_id': self.selected_upper_id,
                   'beg_timestamp': self.beg_timestamp.toString("yyyy-MM-dd"),

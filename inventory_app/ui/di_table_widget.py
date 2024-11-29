@@ -116,18 +116,20 @@ class InventoryTableWidget(QWidget):
         """
         # the indexes of proxy model
         selected_indexes = self.table_view.selectedIndexes()
-        is_valid_indexes = []
-        rows = []
-        for idx in selected_indexes:
-            is_valid_indexes.append(idx.isValid())
-            rows.append(idx.row())
+        unique_rows = set()
 
-        if len(selected_indexes) > 0 and False not in is_valid_indexes:
-            logger.debug(f"Indexes selected: {rows}")
-            return selected_indexes
-        else:
-            logger.debug(f"Indexes not selected or invalid: {selected_indexes}")
+        # no selection
+        if len(selected_indexes) == 0:
             return None
+
+        # check if the indexes are valid
+        for idx in selected_indexes:
+            if not idx.isValid():
+                return None
+            unique_rows.add(idx.row())
+
+        logger.debug(f"Rows({unique_rows}) selected (Indexes selected: {selected_indexes})")
+        return selected_indexes
 
     @Slot(str)
     def do_actions(self, action: str):

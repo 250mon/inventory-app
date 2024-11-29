@@ -21,16 +21,13 @@ class TrWidget(InventoryTableWidget):
         self.parent: QMainWindow = parent
 
     def set_source_model(self, model: TrModel):
-        self.source_model = model
-        self._apply_model()
-
-    def set_source_model(self, model: TrModel):
         """
         Override method for using tr_model's methods (validate_new_row)
         :param model:
         :return:
         """
-        super().set_source_model(model)
+        self.source_model = model
+        self._apply_model()
 
     def _setup_proxy_model(self):
         """
