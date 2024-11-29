@@ -1,0 +1,15 @@
+QPushButton
+{
+}
+
+QPushButton:pressed
+{
+    color: black;
+    background-color: white;
+}
+
+QPushButton:disabled
+{
+    color: grey;
+    background-color: darkgrey;
+}
