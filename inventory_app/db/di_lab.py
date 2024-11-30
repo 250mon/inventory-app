@@ -74,6 +74,9 @@ class Lab(metaclass=Singleton):
         }
 
     async def _get_df_from_db(self, table: str, **kwargs) -> pd.DataFrame:
+        current_loop = asyncio.get_event_loop()
+        logger.debug(f"Current loop id in _get_df_from_db: {id(current_loop)}")
+        
         logger.debug(f"Getting DataFrame for table: {table}")
         
         # Map table names to SQLAlchemy models and their required columns
@@ -129,7 +132,9 @@ class Lab(metaclass=Singleton):
 
         # Execute query and get results
         async with self.db_util.session() as session:
+            logger.debug("Executing query...")
             result = await session.execute(stmt)
+            logger.debug("Query executed")
             records = result.mappings().all()
             
         if not records:

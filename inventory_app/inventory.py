@@ -1,4 +1,4 @@
-import sys
+import sys, asyncio
 import pandas as pd
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QDockWidget, QWidget, QHBoxLayout,
@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QFile
 from PySide6.QtGui import QAction, QIcon
 from ui.login_widget import LoginWidget
 from common.async_helper import AsyncHelper
+from db.db_utils import DbUtil
 from db.di_lab import Lab
 from model.item_model import ItemModel
 from model.sku_model import SkuModel
@@ -36,6 +37,11 @@ class InventoryWindow(QMainWindow):
         super().__init__()
         is_test: str = ConfigReader().get_options("Testmode")
 
+        # AsyncHelper should be initialized before DbUtil
+        # because DbUtil uses the event loop from AsyncHelper
+        # So, AsyncHelper is placed after LoginWidget which
+        # creates DbUtil
+        self.async_helper = AsyncHelper()
         self.login_widget = LoginWidget(self)
         self.login_widget.start_main.connect(self.start_app)
         self.update_all_signal.connect(self.update_all)
@@ -52,11 +58,12 @@ class InventoryWindow(QMainWindow):
 
     def login(self):
         self.login_widget.show()
+        # self.start_app("admin")
 
     @Slot(str)
     def start_app(self, user_name: str):
         self.setup_models(user_name)
-        self.async_helper = AsyncHelper(self, self.do_db_work)
+        self.async_helper.set_worker_entry(self, self.do_db_work)
         self.initUi(user_name)
 
     def setup_models(self, user_name):
@@ -170,7 +177,6 @@ class InventoryWindow(QMainWindow):
         tr_dock_widget.setWidget(self.tr_widget)
         self.addDockWidget(Qt.BottomDockWidgetArea, tr_dock_widget)
 
-    @Slot(str)
     def async_start(self, action: str):
         # send signal to AsyncHelper to schedule the guest (asyncio) event loop
         # inside the host(Qt) event loop
@@ -305,6 +311,11 @@ class InventoryWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    async_helper = AsyncHelper()
+    loop = asyncio.get_event_loop()
+    db_util = DbUtil()
+    db_util.set_loop(loop)
+
 
     # style_file = QFile("qss/aqua.qss")
     # style_file = QFile("qss/dark_orange.qss")
