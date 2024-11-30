@@ -26,18 +26,13 @@ class LoginWidget(QWidget):
         super().__init__()
         self.parent = parent
         self.db_util = DbUtil()
-        # Create AsyncHelper with a dictionary of async operations
-        self.async_helper = AsyncHelper(self, {
-            "test_connection": self.test_connection,
-            "verify_user": self.verify_user,
-            "insert_user": self.insert_user_info,
-            "query_password": self.query_user_password
-        })
+        # Create AsyncHelper for login operations
+        self.async_helper = AsyncHelper(self, self.do_db_work)
         self.initializeUI()
 
     def initializeUI(self):
         """Initialize the Login GUI window."""
-        self.createConnection()
+        # self.createConnection()
         self.setFixedSize(300, 300)
         self.setWindowTitle("로그인")
         self.setupWindow()
@@ -54,6 +49,26 @@ class LoginWidget(QWidget):
             logger.error(f"{e}")
             QMessageBox.critical(None, "Error", "Unable to connect to database")
             sys.exit(1)
+    
+    async def do_db_work(self, action):
+        """This is the function registered to async_helper as a async coroutine"""
+        logger.debug(f"{action}")
+        result_str = None
+        if action == "test_connection":
+            result_str = await self.test_connection()
+        elif action == "verify_user":
+            result_str = await self.verify_user()
+        elif action == "insert_user":
+            result_str = await self.insert_user_info()
+        elif action == "query_password":
+            result_str = await self.query_user_password()
+        else:
+            raise Exception(f"Invalid action: {action}")
+        
+        self.done_signal.emit(action)
+
+        if result_str is not None:
+            QMessageBox.information(self, '결과', result_str, QMessageBox.Close)
 
     async def test_connection(self):
             """Test database connection by querying users table"""

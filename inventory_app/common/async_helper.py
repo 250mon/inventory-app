@@ -26,6 +26,10 @@ class AsyncHelper(QObject):
             self.fn = fn
 
     def __init__(self, worker, entry):
+        """ Initialize the AsyncHelper
+            worker: the worker object that will be used to start and stop the asyncio event loop by sending start_signal and done_signal
+            cb: the entry point for the asyncio event loop
+        """
         super().__init__()
         self.reenter_qt = self.ReenterQtObject()
         self.entry = entry
