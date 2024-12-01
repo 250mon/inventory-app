@@ -1,5 +1,4 @@
 import sys
-from time import sleep
 import bcrypt
 from PySide6.QtWidgets import (
     QWidget, QDialog, QLabel, QPushButton, QLineEdit,
@@ -11,25 +10,19 @@ from sqlalchemy import select
 from db.models import User
 from db.db_utils import DbUtil
 import asyncio
+import qasync
 from common.d_logger import Logs
-from common.async_helper import AsyncHelper
 
 logger = Logs().get_logger("main")
 
 
 class LoginWidget(QWidget):
     start_main = Signal(str)
-    start_signal = Signal(str, dict)
-    done_signal = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
-        # AsyncHelper should be initialized before DbUtil
-        # because DbUtil uses the event loop from AsyncHelper
-        self.async_helper = AsyncHelper()
         self.db_util = DbUtil()
-        self.async_helper.set_worker_entry(self, self.do_db_work)
         self.initializeUI()
 
         # states
@@ -43,48 +36,22 @@ class LoginWidget(QWidget):
         self.setWindowTitle("로그인")
         self.setupWindow()
    
-    async def do_db_work(self, action, *params):
-        """This is the function registered to async_helper as a async coroutine"""
-        logger.debug(f"{action}")
-        if action == "test_connection":
-            result = await self.test_connection()
-            self.connection_checked(result)
-        elif action == "verify_user":
-            result = await self.verify_user(*params)
-        elif action == "insert_user":
-            result = await self.insert_user_info(*params)
-            self.user_info_inserted(result)
-        elif action == "query_password":
-            result = await self.query_user_password(*params)
-            self.password_queried(result)
-        else:
-            raise Exception(f"Invalid action: {action}")
-        
-        self.done_signal.emit(action)
-
-    def check_connection(self):
+    async def check_connection(self):
         """Set up the connection to the database."""
-        self.start_signal.emit("test_connection")
-    
-    def connection_checked(self, is_connected):
-        if is_connected:
+        try:
+            await self.test_connection()
+        except Exception as e:
             logger.error("Unable to Connect.")
             QMessageBox.critical(None, "Error", "Unable to connect to database")
             sys.exit(1)
 
     async def test_connection(self):
         """Test database connection by querying users table"""
-        try:
-            async with self.db_util.session() as session:
-                stmt = select(User)
-                result = await session.execute(stmt)
-                # Just checking if we can execute a query
-                result.first()
-            # Emit done signal after successful completion
-            self.done_signal.emit("test_connection")
-        except Exception as e:
-            logger.error(f"Test connection failed: {e}")
-            raise
+        async with self.db_util.session() as session:
+            stmt = select(User)
+            result = await session.execute(stmt)
+            # Just checking if we can execute a query
+            result.first()
 
     async def query_user_password(self, user_name):
         """Query user password using SQLAlchemy"""
@@ -120,7 +87,6 @@ class LoginWidget(QWidget):
                 
                 await session.commit()
                 logger.debug("User info inserted!")
-                self.done_signal.emit("insert_user")
                 return True
         except Exception as e:
             logger.debug(f"User info not inserted: {e}")
@@ -130,9 +96,7 @@ class LoginWidget(QWidget):
                 "User name or password is improper!!",
                 QMessageBox.Close
             )
-            self.done_signal.emit("insert_user")
             return False
-
 
     def setupWindow(self):
         """Set up the widgets for the login GUI."""
@@ -154,16 +118,15 @@ class LoginWidget(QWidget):
         login_form.addRow("Password:", self.password_entry)
 
         connect_button = QPushButton("Connect")
-        connect_button.clicked.connect(self.process_login)
-        # respond to returnPressed
+        connect_button.clicked.connect(lambda: asyncio.create_task(self.process_login()))
         connect_button.setAutoDefault(True)
 
         change_password_button = QPushButton("Change password")
-        change_password_button.clicked.connect(lambda: self.login_with_change_pw)
+        change_password_button.clicked.connect(self.login_with_change_pw)
         change_password_button.setAutoDefault(True)
 
         new_user_button = QPushButton("Sign up")
-        new_user_button.clicked.connect(lambda: self.register_password_dialog)
+        new_user_button.clicked.connect(self.register_password_dialog)
         new_user_button.setAutoDefault(True)
 
         main_v_box = QVBoxLayout()
@@ -192,19 +155,19 @@ class LoginWidget(QWidget):
         # Compare the hashed input password with the stored password
         return hashed_input_password == stored_password
 
-    def process_login(self):
+    async def process_login(self):
         """Check the user's information."""
         self.user_name = self.user_entry.text()
         self.password = self.password_entry.text()
 
-        # Emit signal to start query_password
-        self.start_signal.emit("query_password", {"user_name": self.user_name})
+        stored_pw = await self.query_user_password(self.user_name)
+        await self.handle_login_result(stored_pw)
     
     def login_with_change_pw(self):
         self.change_pw = True
-        self.process_login()
+        asyncio.create_task(self.process_login())
 
-    def password_queried(self, stored_pw):
+    async def handle_login_result(self, stored_pw):
         if stored_pw is None:
             return False
 
@@ -219,14 +182,14 @@ class LoginWidget(QWidget):
             if self.change_pw:
                 self.register_password_dialog()
             else:
-                sleep(0.5)  # Pause slightly before showing the parent window
+                await asyncio.sleep(0.5)  # Pause slightly before showing the parent window
                 self.start_main.emit(self.user_name)
                 logger.debug("Passed!!!")
         else:
             QMessageBox.warning(self,
-                                "Information Incorrect",
-                                "The user name or password is incorrect.",
-                                QMessageBox.Close)
+                              "Information Incorrect",
+                              "The user name or password is incorrect.",
+                              QMessageBox.Close)
 
     def register_password_dialog(self):
         """Set up the dialog box for the user to create a new user account."""
@@ -249,16 +212,14 @@ class LoginWidget(QWidget):
         self.confirm_password_le = QLineEdit()
         self.confirm_password_le.setEchoMode(QLineEdit.Password)
 
-        # Arrange QLineEdit widgets in a QFormLayout
         dialog_form = QFormLayout()
         if self.user_name is None:
             dialog_form.addRow("User Name:", self.user_name_label)
         dialog_form.addRow("New Password", self.new_password_le)
         dialog_form.addRow("Confirm Password", self.confirm_password_le)
 
-        # Create sign up button
         ok_button = QPushButton("OK")
-        ok_button.clicked.connect(self.accept_user_info)
+        ok_button.clicked.connect(lambda: asyncio.create_task(self.accept_user_info()))
 
         dialog_v_box = QVBoxLayout()
         dialog_v_box.setAlignment(Qt.AlignTop)
@@ -270,7 +231,7 @@ class LoginWidget(QWidget):
         self.user_input_dialog.setLayout(dialog_v_box)
         self.user_input_dialog.show()
 
-    def accept_user_info(self):
+    async def accept_user_info(self):
         """Verify and save user info"""
         user_name_text = (
             self.user_name_label.text() 
@@ -290,19 +251,20 @@ class LoginWidget(QWidget):
         else:
             # If the passwords match, encrypt and save it to the db
             hashed_pw = self.encrypt_password(pw_text)
-            # Emit signal to insert user info
-            # if the user info is inserted, the dialog will be closed and the main window will be shown
-            # by calling user_info_inserted()
-            self.start_signal.emit("insert_user", {"user_name": user_name_text, "hashed_pw": hashed_pw})
-    
-    def user_info_inserted(self, is_inserted):
-        if is_inserted:
-            self.user_input_dialog.close()
-            self.show()
+            is_inserted = await self.insert_user_info(user_name_text, hashed_pw)
+            if is_inserted:
+                self.user_input_dialog.close()
+                self.show()
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
+    
     login_window = LoginWidget()
     login_window.show()
-    sys.exit(app.exec())
+    
+    with loop:
+        loop.run_forever()

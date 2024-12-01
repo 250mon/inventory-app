@@ -32,12 +32,6 @@ class Lab(metaclass=Singleton):
         self._set_db_column_names()
 
         self.bool_initialized = False
-        if not self.bool_initialized:
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(self.async_init())
-            finally:
-                loop.close()
 
     async def async_init(self):
         if self.bool_initialized is False:
@@ -208,22 +202,11 @@ class Lab(metaclass=Singleton):
         logger.debug(f"table {table}")
         self.table_df[table] = await self._get_df_from_db(table, **kwargs)
 
-    async def insert_df(self, table: str, new_df: pd.DataFrame):
-        """Insert DataFrame into database"""
-        logger.debug(f"Inserting into {table}:\n{new_df}")
-        
-        # Ensure we only have the columns that match the database
-        valid_columns = [c.name for c in Base.metadata.tables[table].columns]
-        new_df = new_df[new_df.columns.intersection(valid_columns)]
-        
-        if new_df.empty:
-            logger.warning(f"No valid data to insert for table {table}")
-            return False
-        
-        return await self.db_api.insert_df(table, new_df)
+    async def insert_df(self, table: str, new_df: pd.DataFrame, session=None):
+        return await self.db_api.insert_df(table, new_df, session)
 
-    async def update_df(self, table: str, up_df: pd.DataFrame):
-        return await self.db_api.update_df(table, up_df)
+    async def update_df(self, table: str, up_df: pd.DataFrame, session=None):
+        return await self.db_api.update_df(table, up_df, session)
 
-    async def delete_df(self, table: str, del_df: pd.DataFrame):
-        return await self.db_api.delete_df(table, del_df)
+    async def delete_df(self, table: str, del_df: pd.DataFrame, session=None):
+        return await self.db_api.delete_df(table, del_df, session)

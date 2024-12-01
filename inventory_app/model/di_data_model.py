@@ -30,12 +30,12 @@ class DataModel(PandasModel):
         # a list of columns which are used to make a df updating db
         self.db_column_names = None
 
-        # set model_df
-        self._set_model_df()
-
         # by selecting an id of the upper layer,
         # the lower layer view is updated
         self.selected_upper_id = None
+
+        # Initialize the model data
+        self._set_model_df()
 
     def get_user_privilege(self):
         if self.user_name in ADMIN_GROUP:
@@ -118,6 +118,7 @@ class DataModel(PandasModel):
         :return:
         """
         logger.debug(f"setting the df of Lab to {self.table_name}_model_f")
+        # Directly assign the DataFrame from Lab's table_df
         self.model_df = Lab().table_df[self.table_name]
 
         # we store the columns list here for later use of db update
@@ -129,13 +130,13 @@ class DataModel(PandasModel):
         # fill name columns against ids of each auxiliary data
         self.set_add_on_cols()
 
-    def update_model_df_from_db(self):
+    async def update_model_df_from_db(self):
         """
         Update the model_df and the view
         :return:
         """
         logger.debug(f"Update the model_df and the view")
-        self._set_model_df()
+        await self._set_model_df()
         self.layoutAboutToBeChanged.emit()
         self.layoutChanged.emit()
 
@@ -150,7 +151,7 @@ class DataModel(PandasModel):
         logger.debug("Downloading data from DB")
         await Lab().update_lab_df_from_db(self.table_name, **kwargs)
         logger.debug("Updating the model and view")
-        self.update_model_df_from_db()
+        await self.update_model_df_from_db()
 
     def get_default_delegate_info(self) -> List[int]:
         """
@@ -439,8 +440,6 @@ class DataModel(PandasModel):
             new_df.loc[:, [self.get_col_name(0)]] = 'DEFAULT'
             logger.debug(f"\n{new_df}")
             df_to_upload = new_df.loc[:, self.db_column_names]
-            # set id default to let DB assign an id without collision
-            # df_to_upload.loc[:, self.get_col_name(0)] = 'DEFAULT'
             logger.debug(f"\n{df_to_upload}")
             results_new = await Lab().insert_df(self.table_name, df_to_upload)
             total_results['추가'] = results_new

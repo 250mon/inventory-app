@@ -1,4 +1,5 @@
-import sys, asyncio
+import sys
+import asyncio
 import pandas as pd
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QDockWidget, QWidget, QHBoxLayout,
@@ -6,9 +7,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, Slot, QFile
 from PySide6.QtGui import QAction, QIcon
+from qasync import asyncSlot, QEventLoop
 from ui.login_widget import LoginWidget
-from common.async_helper import AsyncHelper
-from db.db_utils import DbUtil
 from db.di_lab import Lab
 from model.item_model import ItemModel
 from model.sku_model import SkuModel
@@ -21,13 +21,9 @@ from constants import ConfigReader, ADMIN_GROUP
 from model.emr_tr_reader import EmrTransactionReader
 from ui.emr_import_widget import ImportWidget
 
-
 logger = Logs().get_logger("main")
 
-
 class InventoryWindow(QMainWindow):
-    start_signal = Signal(str)
-    done_signal = Signal(str)
     edit_lock_signal = Signal(str)
     edit_unlock_signal = Signal(str)
     update_all_signal = Signal()
@@ -35,35 +31,20 @@ class InventoryWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        is_test: str = ConfigReader().get_options("Testmode")
-
-        # AsyncHelper should be initialized before DbUtil
-        # because DbUtil uses the event loop from AsyncHelper
-        # So, AsyncHelper is placed after LoginWidget which
-        # creates DbUtil
-        self.async_helper = AsyncHelper()
         self.login_widget = LoginWidget(self)
         self.login_widget.start_main.connect(self.start_app)
-        self.update_all_signal.connect(self.update_all)
+        self.update_all_signal.connect(lambda: self.do_db_work("all_update"))
         self.import_trs_signal.connect(self.import_transactions)
-
-        if is_test.lower() == "true":
-            self.start_app("test")
-        elif is_test.lower() == "admin":
-            self.start_app("admin")
-        else:
-            self.login()
 
         self.import_widget = None
 
     def login(self):
         self.login_widget.show()
-        # self.start_app("admin")
 
     @Slot(str)
-    def start_app(self, user_name: str):
+    async def start_app(self, user_name: str):
+        await Lab().async_init()
         self.setup_models(user_name)
-        self.async_helper.set_worker_entry(self, self.do_db_work)
         self.initUi(user_name)
 
     def setup_models(self, user_name):
@@ -177,18 +158,10 @@ class InventoryWindow(QMainWindow):
         tr_dock_widget.setWidget(self.tr_widget)
         self.addDockWidget(Qt.BottomDockWidgetArea, tr_dock_widget)
 
-    def async_start(self, action: str):
-        # send signal to AsyncHelper to schedule the guest (asyncio) event loop
-        # inside the host(Qt) event loop
-        # AsyncHelper will eventually call self.save_to_db(action, action)
-        self.start_signal.emit(action)
-
+    @asyncSlot()
     async def do_db_work(self, action: str):
         """
-        This is the function registered to async_helper as a async coroutine
-        :param action:
-        :param df:
-        :return:
+        This is the async coroutine that handles database operations
         """
         logger.debug(f"{action}")
         result_str = None
@@ -224,11 +197,9 @@ class InventoryWindow(QMainWindow):
             self.tr_model.selected_upper_id = None
             await self.tr_model.update()
 
-        self.done_signal.emit(action)
-
         if result_str is not None:
             QMessageBox.information(self,
-                                    '저장결과',
+                                    '���장결과',
                                     result_str,
                                     QMessageBox.Close)
 
@@ -292,10 +263,6 @@ class InventoryWindow(QMainWindow):
 
         self.update_all()
 
-    @Slot()
-    def update_all(self):
-        self.async_start("all_update")
-
     def reset_password(self):
         u_name, ok = QInputDialog.getText(self, "Reset Password", "Enter user name:")
         if ok:
@@ -309,26 +276,31 @@ class InventoryWindow(QMainWindow):
         self.login_widget.show()
 
 
-def main():
+async def main():
     app = QApplication(sys.argv)
-    async_helper = AsyncHelper()
-    loop = asyncio.get_event_loop()
-    db_util = DbUtil()
-    db_util.set_loop(loop)
+    
+    # style_file = QFile("qss/di_custom.qss")
+    # style_file.open(QFile.ReadOnly)
+    # app.setStyleSheet(style_file.readAll().toStdString())
 
+    # Create event loop and inventory window
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+    
+    window = InventoryWindow()
 
-    # style_file = QFile("qss/aqua.qss")
-    # style_file = QFile("qss/dark_orange.qss")
-    # style_file = QFile("qss/light_blue.qss")
-    style_file = QFile("qss/di_custom.qss")
-    style_file.open(QFile.ReadOnly)
-    app.setStyleSheet(style_file.readAll().toStdString())
+    # is_test: str = ConfigReader().get_options("Testmode")
+    # if is_test.lower() == "true":
+    #     await window.start_app("test")
+    # elif is_test.lower() == "admin":
+    #     await window.start_app("admin")
+    # else:
+    #     window.login()
+   
+    # Run the event loop
+    with loop:
+        loop.run_until_complete(window.start_app("test"))
+        loop.run_forever()
 
-    InventoryWindow()
-    app.exec()
-
-
-try:
-    main()
-except Exception as e:
-    logger.error("Unexpected exception! %s", e)
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -23,7 +23,6 @@ class DbApi:
 
     async def insert_df(self, table: str, new_df: pd.DataFrame):
         """Insert DataFrame records into database"""
-        # Map table names to SQLAlchemy models
         model_map = {
             'category': Category,
             'items': Item,
@@ -45,7 +44,7 @@ class DbApi:
             async with self.db_util.session() as session:
                 session.add_all([model(**record) for record in records])
                 await session.commit()
-            return True
+                return True
             
         except Exception as e:
             logger.error(f"Error inserting records: {str(e)}")
