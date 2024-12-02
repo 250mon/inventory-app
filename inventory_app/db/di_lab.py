@@ -202,11 +202,18 @@ class Lab(metaclass=Singleton):
         logger.debug(f"table {table}")
         self.table_df[table] = await self._get_df_from_db(table, **kwargs)
 
-    async def insert_df(self, table: str, new_df: pd.DataFrame, session=None):
-        return await self.db_api.insert_df(table, new_df, session)
+    async def insert_df(self, table: str, new_df: pd.DataFrame):
+        logger.debug(f"=== Lab.insert_df called for {table} ===")
+        logger.debug(f"DataFrame before insert:\n{new_df}")
+        result = await self.db_api.insert_df(table, new_df)
+        logger.debug(f"Insert result: {result}")
+        return result
 
-    async def update_df(self, table: str, up_df: pd.DataFrame, session=None):
-        return await self.db_api.update_df(table, up_df, session)
+    async def update_df(self, table: str, up_df: pd.DataFrame):
+        return await self.db_api.update_df(table, up_df)
 
-    async def delete_df(self, table: str, del_df: pd.DataFrame, session=None):
-        return await self.db_api.delete_df(table, del_df, session)
+    async def delete_df(self, table: str, del_df: pd.DataFrame):
+        return await self.db_api.delete_df(table, del_df)
+
+    async def delete_row(self, table: str, row_ids: List[int]):
+        return await self.db_api.delete_df(table, row_ids)

@@ -10,7 +10,7 @@ from model.tr_model import TrModel
 from ui.di_table_widget import InventoryTableWidget
 from ui.single_tr_window import SingleTrWindow
 from constants import UserPrivilege
-
+from qasync import asyncSlot
 
 logger = Logs().get_logger("main")
 
@@ -195,18 +195,14 @@ class TrWidget(InventoryTableWidget):
             if selected_indexes := self._get_selected_indexes():
                 self.delete_rows(selected_indexes)
 
-    def save_model_to_db(self):
+    @asyncSlot()
+    async def save_model_to_db(self):
         """
         Save the model to DB
-        It calls the inventory view's async_start() which calls back the model's
-        save_to_db()
         :return:
         """
         self.source_model.update_sku_qty()
-
-        if hasattr(self.parent, "async_start"):
-            self.parent.async_start("tr_save")
-
+        await self.parent.do_db_work("tr_save")
         self.parent.edit_unlock_signal.emit("tr_widget")
 
     def add_new_row(self, **kwargs):

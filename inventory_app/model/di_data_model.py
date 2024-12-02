@@ -130,13 +130,13 @@ class DataModel(PandasModel):
         # fill name columns against ids of each auxiliary data
         self.set_add_on_cols()
 
-    async def update_model_df_from_db(self):
+    def update_model_df_from_db(self):
         """
         Update the model_df and the view
         :return:
         """
         logger.debug(f"Update the model_df and the view")
-        await self._set_model_df()
+        self._set_model_df()
         self.layoutAboutToBeChanged.emit()
         self.layoutChanged.emit()
 
@@ -151,7 +151,7 @@ class DataModel(PandasModel):
         logger.debug("Downloading data from DB")
         await Lab().update_lab_df_from_db(self.table_name, **kwargs)
         logger.debug("Updating the model and view")
-        await self.update_model_df_from_db()
+        self.update_model_df_from_db()
 
     def get_default_delegate_info(self) -> List[int]:
         """
@@ -429,16 +429,15 @@ class DataModel(PandasModel):
             self.drop_rows(del_df.index.to_list())
             logger.debug(f"\n{del_df}")
             # DB data is to be deleted from here
-            df_to_upload = del_df.loc[:, self.db_column_names]
-            logger.debug(f"\n{df_to_upload}")
-            results_del = await Lab().delete_df(self.table_name, df_to_upload)
+            # df_to_upload = del_df.loc[:, self.db_column_names]
+            # logger.debug(f"\n{df_to_upload}")
+            # results_del = await Lab().delete_df(self.table_name, df_to_upload)
+            results_del = await Lab().delete_row(self.table_name, del_df.iloc[:, 0].to_list())
             total_results['삭제'] = results_del
             logger.debug(f"result of deleting = {results_del}")
 
         new_df = self.get_new_df()
         if not new_df.empty:
-            new_df.loc[:, [self.get_col_name(0)]] = 'DEFAULT'
-            logger.debug(f"\n{new_df}")
             df_to_upload = new_df.loc[:, self.db_column_names]
             logger.debug(f"\n{df_to_upload}")
             results_new = await Lab().insert_df(self.table_name, df_to_upload)

@@ -8,6 +8,7 @@ from PySide6.QtGui import QFont
 from common.d_logger import Logs, logging
 from ui.di_table_widget import InventoryTableWidget
 from model.sku_model import SkuModel
+from qasync import asyncSlot
 
 
 logger = Logs().get_logger("main")
@@ -101,7 +102,7 @@ class SkuWidget(InventoryTableWidget):
         if sender != "sku_widget":
             self.edit_mode.setEnabled(False)
 
-    @ Slot()
+    @Slot()
     def edit_mode_clicked(self):
         if self.edit_mode.isChecked():
             logger.debug("Now enter into edit mode")
@@ -142,15 +143,14 @@ class SkuWidget(InventoryTableWidget):
             if selected_indexes := self._get_selected_indexes():
                 self.delete_rows(selected_indexes)
 
-    def save_model_to_db(self):
+    @asyncSlot()
+    async def save_model_to_db(self):
         """
         Save the model to DB
-        It calls the inventory view's async_start() which calls back the model's
-        save_to_db()
         :return:
         """
-        if hasattr(self.parent, "async_start"):
-            self.parent.async_start("sku_save")
+        logger.debug("Saving skus ...")
+        await self.parent.do_db_work("sku_save")
         self.edit_mode.setChecked(False)
         self.edit_mode_ends()
 

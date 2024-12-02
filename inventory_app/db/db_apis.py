@@ -1,3 +1,4 @@
+from typing import List
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 import pandas as pd
@@ -23,6 +24,10 @@ class DbApi:
 
     async def insert_df(self, table: str, new_df: pd.DataFrame):
         """Insert DataFrame records into database"""
+        logger.debug(f"=== Starting DB Insert for {table} ===")
+        logger.debug(f"Columns in DataFrame: {new_df.columns.tolist()}")
+        logger.debug(f"Data types: {new_df.dtypes}")
+        
         model_map = {
             'category': Category,
             'items': Item,
@@ -39,15 +44,24 @@ class DbApi:
             
         try:
             records = new_df.to_dict('records')
-            logger.debug(f"Inserting records: {records}")
+            logger.debug(f"Converting DataFrame to records:")
+            for record in records:
+                logger.debug(f"Record to insert: {record}")
             
             async with self.db_util.session() as session:
-                session.add_all([model(**record) for record in records])
-                await session.commit()
-                return True
+                try:
+                    session.add_all([model(**record) for record in records])
+                    await session.commit()
+                    logger.debug("Successfully inserted records")
+                    return True
+                except Exception as e:
+                    logger.error(f"Database error during insert: {str(e)}")
+                    logger.error(f"Error type: {type(e)}")
+                    raise
             
         except Exception as e:
-            logger.error(f"Error inserting records: {str(e)}")
+            logger.error(f"Error in insert_df: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
             return False
 
     async def delete_df(self, table: str, del_df: pd.DataFrame):
@@ -66,4 +80,11 @@ class DbApi:
                     getattr(model.c, up_df.columns[0]) == record[up_df.columns[0]]
                 ).values(**{k: v for k, v in record.items() if k != up_df.columns[0]})
                 await session.execute(stmt)
+            await session.commit()
+
+    async def delete_row(self, table: str, row_ids: List[int]):
+        model = Base.metadata.tables[table]
+        async with self.db_util.session() as session:
+            stmt = model.delete().where(model.c.id.in_(row_ids))
+            await session.execute(stmt)
             await session.commit()

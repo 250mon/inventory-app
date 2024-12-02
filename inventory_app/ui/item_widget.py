@@ -9,6 +9,7 @@ from common.d_logger import Logs
 from ui.di_table_widget import InventoryTableWidget
 from model.item_model import ItemModel
 from ui.single_item_window import SingleItemWindow
+from qasync import asyncSlot
 
 logger = Logs().get_logger("main")
 
@@ -170,15 +171,13 @@ class ItemWidget(InventoryTableWidget):
                 logger.debug(f"del_item {selected_indexes}")
                 self.delete_rows(selected_indexes)
 
-    def save_model_to_db(self):
+    @asyncSlot()
+    async def save_model_to_db(self):
         """
         Save the model to DB
-        It calls the inventory view's async_start() which calls back the model's
-        save_to_db()
         :return:
         """
-        if hasattr(self.parent, "async_start"):
-            self.parent.async_start("item_save")
+        await self.parent.do_db_work("item_save")
         self.edit_mode.setChecked(False)
         self.edit_mode_ends()
 
