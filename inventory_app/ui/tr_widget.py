@@ -252,13 +252,14 @@ class TrWidget(InventoryTableWidget):
         if src_idx.row() not in self.source_model.editable_rows_set:
             self.source_model.clear_editable_rows()
 
-    def update_tr_view(self):
+    async def update_tr_view(self):
         # retrieve the data about the selected sku_id from DB
-        self.parent.async_start('tr_update')
+        await self.parent.do_db_work("tr_update")
         # displaying the sku name in the tr view
         self.sku_name_label.setText(self.source_model.selected_upper_name)
 
-    def filter_for_selected_upper_id(self, sku_id: int):
+    @asyncSlot()
+    async def filter_for_selected_upper_id(self, sku_id: int):
         """
         A double-click event in the sku view triggers the parent's
         sku_selected method which in turn calls this method
@@ -270,9 +271,10 @@ class TrWidget(InventoryTableWidget):
         self.source_model.del_new_rows()
         # set selected_sku_id
         self.source_model.set_upper_model_id(sku_id)
-        self.update_tr_view()
+        await self.update_tr_view()
 
-    def filter_for_search_all(self):
+    @asyncSlot()
+    async def filter_for_search_all(self):
         """
         Connected to search all button
         :return:
@@ -281,8 +283,9 @@ class TrWidget(InventoryTableWidget):
         self.source_model.del_new_rows()
         # set selected_sku_id to None
         self.source_model.set_upper_model_id(None)
-        self.update_tr_view()
+        await self.update_tr_view()
 
-    def set_max_search_count(self, max_count: int):
+    @asyncSlot()
+    async def set_max_search_count(self, max_count: int):
         Lab().set_max_transaction_count(max_count)
-        self.filter_for_selected_upper_id(self.source_model.selected_upper_id)
+        await self.filter_for_selected_upper_id(self.source_model.selected_upper_id)

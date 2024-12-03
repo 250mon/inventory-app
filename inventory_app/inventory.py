@@ -203,28 +203,32 @@ class InventoryWindow(QMainWindow):
                                     result_str,
                                     QMessageBox.Close)
 
-    def item_selected(self, item_id: int):
+    @asyncSlot()
+    async def item_selected(self, item_id: int):
         """
         A double-click event in the item view triggers this method,
         and this method consequently calls the sku view to display
         the item selected
         """
-        self.sku_widget.filter_for_selected_upper_id(item_id)
+        await self.sku_widget.filter_for_selected_upper_id(item_id)
 
-    def sku_selected(self, sku_id: int):
+    @asyncSlot()
+    async def sku_selected(self, sku_id: int):
         """
         A double-click event in the sku view triggers this method,
         and this method consequently calls transaction view to display
         the sku selected
         """
-        self.tr_widget.filter_for_selected_upper_id(sku_id)
+        await self.tr_widget.filter_for_selected_upper_id(sku_id)
 
-    def show_file_dialog(self):
+    @asyncSlot()
+    async def show_file_dialog(self):
         fname = QFileDialog.getOpenFileName(self, 'Open file', '../')
         if fname[0]:
-            self.read_emrfile(fname[0])
+            await self.read_emrfile(fname[0])
 
-    def read_emrfile(self, file_name):
+    @asyncSlot()
+    async def read_emrfile(self, file_name):
         reader = EmrTransactionReader(file_name, self)
         if reader is None:
             logger.debug("Invalid file")
@@ -239,8 +243,8 @@ class InventoryWindow(QMainWindow):
 
         self.import_widget.show()
 
-    @Slot(pd.DataFrame)
-    def import_transactions(self, emr_df):
+    @asyncSlot(pd.DataFrame)
+    async def import_transactions(self, emr_df):
         if emr_df is None or emr_df.empty:
             logger.debug("emr_df is empty")
         else:
@@ -252,8 +256,8 @@ class InventoryWindow(QMainWindow):
                                         result_s.to_string(index=False),
                                         QMessageBox.Close)
 
-
-    def view_inactive_items(self):
+    @asyncSlot()
+    async def view_inactive_items(self):
         if Lab().show_inactive_items:
             Lab().show_inactive_items = False
             self.inactive_item_action.setText('Show inactive items')
@@ -261,15 +265,17 @@ class InventoryWindow(QMainWindow):
             Lab().show_inactive_items = True
             self.inactive_item_action.setText('Hide inactive items')
 
-        self.update_all()
+        await self.do_db_work("all_update")
 
-    def reset_password(self):
+    @asyncSlot()
+    async def reset_password(self):
         u_name, ok = QInputDialog.getText(self, "Reset Password", "Enter user name:")
         if ok:
             hashed_pw = self.login_widget.encrypt_password("a")
-            self.login_widget.insert_user_info(u_name, hashed_pw)
+            await self.login_widget.insert_user_info(u_name, hashed_pw)
 
-    def change_user(self):
+    @asyncSlot()
+    async def change_user(self):
         self.close()
         self.login_widget.start_main.disconnect()
         self.login_widget.start_main.connect(self.initUi)

@@ -1,13 +1,15 @@
 import re
 import asyncio
 from typing import List
+from datetime import datetime
 from db.db_apis import DbApi
 import pandas as pd
 from common.d_logger import Logs
 from constants import MAX_TRANSACTION_COUNT
 from common.singleton import Singleton
 from db.models import Base
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
+from sqlalchemy.types import DateTime
 from .models import Category, Item, SKU, User, TransactionType, Transaction
 
 
@@ -117,10 +119,18 @@ class Lab(metaclass=Singleton):
             if sku_id is not None:
                 stmt = stmt.where(Transaction.sku_id == sku_id)
                 if beg_ts and end_ts:
-                    stmt = stmt.where(and_(
-                        Transaction.tr_timestamp >= beg_ts,
-                        Transaction.tr_timestamp <= end_ts
-                    ))
+                    try:
+                        # Convert string dates to datetime objects
+                        beg_datetime = datetime.strptime(beg_ts, '%Y-%m-%d')
+                        end_datetime = datetime.strptime(end_ts, '%Y-%m-%d')
+                        
+                        stmt = stmt.where(and_(
+                            Transaction.tr_timestamp >= beg_datetime,
+                            Transaction.tr_timestamp <= end_datetime
+                        ))
+                    except ValueError as e:
+                        logger.error(f"Error parsing date strings: {e}")
+                        # If date parsing fails, don't apply the timestamp filter
             
             stmt = stmt.order_by(Transaction.tr_id.desc()).limit(self.max_transaction_count)
 
@@ -212,8 +222,10 @@ class Lab(metaclass=Singleton):
     async def update_df(self, table: str, up_df: pd.DataFrame):
         return await self.db_api.update_df(table, up_df)
 
-    async def delete_df(self, table: str, del_df: pd.DataFrame):
-        return await self.db_api.delete_df(table, del_df)
-
-    async def delete_row(self, table: str, row_ids: List[int]):
-        return await self.db_api.delete_df(table, row_ids)
+    async def delete_rows(self, table: str, row_ids: List[int]):
+        """
+        Delete rows from database table by their IDs
+        :param table: table name
+        :param row_ids: List of IDs to delete
+        """
+        return await self.db_api.delete_rows(table, row_ids)

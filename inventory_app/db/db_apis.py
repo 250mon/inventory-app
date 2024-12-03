@@ -64,13 +64,24 @@ class DbApi:
             logger.error(f"Error type: {type(e)}")
             return False
 
-    async def delete_df(self, table: str, del_df: pd.DataFrame):
+    async def delete_rows(self, table: str, row_ids: List[int]):
+        """
+        Delete records from database table by their IDs
+        :param table: table name
+        :param row_ids: List of IDs to delete
+        """
         model = Base.metadata.tables[table]
         async with self.db_util.session() as session:
-            col_name, id_series = next(del_df.items())
-            stmt = model.delete().where(getattr(model.c, col_name).in_(id_series))
-            await session.execute(stmt)
-            await session.commit()
+            try:
+                # Determine the ID column name based on table name
+                id_column = f"{table[:-1]}_id" if table.endswith('s') else 'id'
+                stmt = model.delete().where(getattr(model.c, id_column).in_(row_ids))
+                await session.execute(stmt)
+                await session.commit()
+                return None  # Success case
+            except Exception as e:
+                logger.error(f"Error deleting from {table}: {str(e)}")
+                return e
 
     async def update_df(self, table: str, up_df: pd.DataFrame):
         model = Base.metadata.tables[table]
@@ -80,11 +91,4 @@ class DbApi:
                     getattr(model.c, up_df.columns[0]) == record[up_df.columns[0]]
                 ).values(**{k: v for k, v in record.items() if k != up_df.columns[0]})
                 await session.execute(stmt)
-            await session.commit()
-
-    async def delete_row(self, table: str, row_ids: List[int]):
-        model = Base.metadata.tables[table]
-        async with self.db_util.session() as session:
-            stmt = model.delete().where(model.c.id.in_(row_ids))
-            await session.execute(stmt)
             await session.commit()

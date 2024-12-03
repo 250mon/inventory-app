@@ -426,13 +426,13 @@ class DataModel(PandasModel):
 
         del_df = self.get_deleted_df()
         if not del_df.empty:
+            # Get the IDs before dropping the rows
+            ids_to_delete = del_df.iloc[:, 0].to_list()
             self.drop_rows(del_df.index.to_list())
             logger.debug(f"\n{del_df}")
-            # DB data is to be deleted from here
-            # df_to_upload = del_df.loc[:, self.db_column_names]
-            # logger.debug(f"\n{df_to_upload}")
-            # results_del = await Lab().delete_df(self.table_name, df_to_upload)
-            results_del = await Lab().delete_row(self.table_name, del_df.iloc[:, 0].to_list())
+            
+            # Use delete_rows instead of delete_df
+            results_del = await Lab().delete_rows(self.table_name, ids_to_delete)
             total_results['삭제'] = results_del
             logger.debug(f"result of deleting = {results_del}")
 
