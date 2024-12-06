@@ -1,21 +1,18 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from constants import ConfigReader
+from config import Config
 from common.d_logger import Logs
 from .models import Base
 from contextlib import asynccontextmanager
-import asyncio
-import qasync
 from common.singleton import Singleton
 
 logger = Logs().get_logger("db")
 
 class DbUtil(metaclass=Singleton):
     def __init__(self):
-        config = ConfigReader()
         self.engine = create_async_engine(
-            f"postgresql+asyncpg://{config.get_options('User')}:{config.get_options('Password')}"
-            f"@{config.get_options('Host')}:{config.get_options('Port')}/{config.get_options('Database')}",
+            f"postgresql+asyncpg://{Config.DB_USER}:{Config.DB_PASSWORD}"
+            f"@{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}",
             echo=True,
             future=True
         )

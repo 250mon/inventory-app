@@ -11,7 +11,7 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
 pandas = "^2.2.3"
-pyside6 = "^6.8.0.2"
+pyside6 = "^6.8.0"
 sqlalchemy = "^2.0.36"
 bcrypt = "^4.2.1"
 asyncpg = "^0.30.0"
@@ -22,7 +22,8 @@ qasync = "^0.27.1"
 pytest = "^8.3.4"
 pytest-qt = "^4.4.0"
 pytest-asyncio = "^0.24.0"
-pytest-mock = "^3.14.0"
+pytest-mock = "^3.10.0"
+python-dotenv = "^1.0.1"
 
 
 [build-system]

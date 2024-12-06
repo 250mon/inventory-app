@@ -1,179 +1,144 @@
-import pandas as pd
-from typing import Dict, List
 from PySide6.QtCore import Qt, QModelIndex, Signal
-from model.di_data_model import DataModel
-from db.di_lab import Lab
+from model.sql_model import SQLTableModel
+from services.item_service import ItemService
+from model.category_model import CategoryModel
+from config import Config
 from common.d_logger import Logs
-from constants import RowFlags, EditLevel
-
 
 logger = Logs().get_logger("main")
 
-"""
-Handling a raw dataframe from db to convert into model data(dataframe)
-Also, converting model data(dataframe) back into a data class to update db
-"""
-
-
-class ItemModel(DataModel):
+class ItemModel(SQLTableModel):
     item_model_changed_signal = Signal(object)
 
-    def __init__(self, user_name):
-        self.init_params()
-        super().__init__(user_name)
+    def __init__(self, user_name: str, item_service: ItemService, category_model: CategoryModel):
+        super().__init__()
+        self.user_name = user_name
+        self._service = item_service
+        self._category_model = category_model
+        self._setup_model()
 
-    def init_params(self):
-        self.set_table_name('items')
-
+    def _setup_model(self):
+        """Initialize model parameters"""
+        self._headers = [
+            'item_id', 'active', 'item_name', 'category_name',
+            'description', 'category_id', 'flag'
+        ]
+        self._column_map = {col: idx for idx, col in enumerate(self._headers)}
+        
         self.col_edit_lvl = {
-            'item_id': EditLevel.NotEditable,
-            'active': EditLevel.AdminModifiable,
-            'item_name': EditLevel.AdminModifiable,
-            'category_name': EditLevel.UserModifiable,
-            'description': EditLevel.UserModifiable,
-            'category_id': EditLevel.NotEditable,
-            'flag': EditLevel.NotEditable
+            'item_id': Config.EditLevel.NotEditable,
+            'active': Config.EditLevel.AdminModifiable,
+            'item_name': Config.EditLevel.AdminModifiable,
+            'category_name': Config.EditLevel.UserModifiable,
+            'description': Config.EditLevel.UserModifiable,
+            'category_id': Config.EditLevel.NotEditable,
+            'flag': Config.EditLevel.NotEditable
         }
-        self.set_column_names(list(self.col_edit_lvl.keys()))
-        self.set_column_index_edit_level(self.col_edit_lvl)
 
-    def set_add_on_cols(self):
-        """
-        Needs to be implemented in the subclasses
-        Adds extra columns of each name mapped to ids of supplementary data
-        :return:
-        """
-        # set more columns for the view
-        self.model_df['category_name'] = self.model_df['category_id'].map(Lab().category_name_s)
-        self.model_df['flag'] = RowFlags.OriginalRow
+    async def load_data(self):
+        """Load items from service"""
+        self._data = await self._service.get_items()
+        self.layoutChanged.emit()
 
     def get_default_delegate_info(self) -> List[int]:
-        """
-        Returns a list of column indexes for default delegate
-        :return:
-        """
-        default_info_list = [self.get_col_number(c) for c in ['item_name', 'description']]
-        return default_info_list
+        """Returns column indexes for default delegate"""
+        return [self.get_col_number(c) for c in ['item_name', 'description']]
 
     def get_combobox_delegate_info(self) -> Dict[int, List]:
-        """
-        Returns a dictionary of column indexes and val lists of the combobox
-        for combobox delegate
-        :return:
-        """
-        combo_info_dict = {
+        """Returns column indexes and values for combobox delegate"""
+        return {
             self.get_col_number('active'): ['Y', 'N'],
-            self.get_col_number('category_name'): Lab().category_name_s.to_list()
+            self.get_col_number('category_name'): self._category_model.get_category_names()
         }
-        return combo_info_dict
 
     def data(self, index: QModelIndex, role=Qt.DisplayRole) -> object:
-        """
-        Override method from QAbstractTableModel
-        QTableView accepts only QString as input for display
-        Returns data cell from the pandas DataFrame
-        """
         if not index.isValid():
             return None
 
+        row = self._data[index.row()]
         col_name = self.get_col_name(index.column())
-        data_to_display = self.model_df.iloc[index.row(), index.column()]
+
         if role == Qt.DisplayRole or role == Qt.EditRole or role == self.SortRole:
-            int_type_columns = ['item_id', 'category_id']
-            if col_name in int_type_columns:
-                # if column data is int, return int type
-                return int(data_to_display)
-
+            if col_name == 'item_id' or col_name == 'category_id':
+                return getattr(row, col_name)
             elif col_name == 'active':
-                if data_to_display:
-                    return 'Y'
-                else:
-                    return 'N'
-
+                return 'Y' if getattr(row, col_name) else 'N'
             else:
-                # otherwise, string type
-                return str(data_to_display)
+                return str(getattr(row, col_name))
 
         elif role == Qt.TextAlignmentRole:
-            left_aligned = ['description']
-            if col_name in left_aligned:
-                return Qt.AlignLeft
-            else:
-                return Qt.AlignCenter
+            return Qt.AlignLeft if col_name == 'description' else Qt.AlignCenter
 
-        else:
-            return super().data(index, role)
+        return None
 
-    def setData(self,
-                index: QModelIndex,
-                value: object,
-                role=Qt.EditRole):
-        """
-        Override method from QAbstractTableModel
-        :param index:
-        :param value:
-        :param role:
-        :return:
-        """
+    def setData(self, index: QModelIndex, value: object, role=Qt.EditRole) -> bool:
         if not index.isValid() or role != Qt.EditRole:
             return False
 
-        logger.debug(f"index({index}) value({value})")
-
+        row = self._data[index.row()]
         col_name = self.get_col_name(index.column())
-        if col_name == 'active':
-            # taking care of converting str type input to bool type
-            if value == 'Y':
-                value = True
+
+        try:
+            if col_name == 'active':
+                setattr(row, col_name, value == 'Y')
+            elif col_name == 'category_name':
+                # Find category_id using CategoryModel
+                category = self._category_model.get_category_by_name(value)
+                if category:
+                    setattr(row, 'category_id', category.category_id)
+                    setattr(row, col_name, value)
+            elif col_name == 'item_name':
+                # Check for duplicates
+                if any(item.item_name == value for item in self._data if item != row):
+                    logger.debug(f"item name({value}) is already in use")
+                    return False
+                setattr(row, col_name, value)
             else:
-                value = False
+                setattr(row, col_name, value)
 
-        elif col_name == 'category_name':
-            # if setting category_name, automatically setting category_id accordingly
-            cat_id_col = self.get_col_number('category_id')
-            self.model_df.iloc[index.row(), cat_id_col] = Lab().category_id_s[value]
+            self.dataChanged.emit(index, index)
+            return True
 
-        elif col_name == 'item_name':
-            # when a new row is added, item_name needs to be checked if any duplicate
-            if not self.model_df[self.model_df.item_name == value].empty:
-                logger.debug(f"item name({value}) is already in use")
-                return False
+        except Exception as e:
+            logger.error(f"Error setting data: {e}")
+            return False
 
-        return super().setData(index, value, role)
+    async def save_changes(self):
+        """Save changes to database"""
+        for row in self._data:
+            if getattr(row, 'flag', None) == Config.RowFlags.NewRow:
+                # For new items, include all fields except item_id
+                item_data = self.get_clean_data(row, exclude_fields=['item_id'])
+                await self._service.create_item(item_data)
+            elif getattr(row, 'flag', None) == Config.RowFlags.ChangedRow:
+                # For updates, exclude unchangeable fields
+                item_data = self.get_clean_data(row, exclude_fields=['item_id'])
+                await self._service.update_item(row.item_id, item_data)
+            elif getattr(row, 'flag', None) == Config.RowFlags.DeletedRow:
+                await self._service.delete_item(row.item_id)
 
-    def make_a_new_row_df(self, next_new_id, **kwargs):
-        """
-        Needs to be implemented in subclasses
-        :param next_new_id:
-        :return:
-        """
-        default_cat_id = 1
-        cat_name = Lab().category_name_s.loc[default_cat_id]
-        new_model_df = pd.DataFrame([{
-            'item_id': next_new_id,
-            'active': True,
-            'item_name': "",
-            'category_name': cat_name,
-            'description': "",
-            'category_id': default_cat_id,
-            'flag': RowFlags.NewRow
-        }])
-        return new_model_df
+        await self.load_data()
+
+    def is_active_row(self, index: QModelIndex) -> bool:
+        if not index.isValid():
+            return False
+        return bool(self._data[index.row()].active)
 
     def validate_new_row(self, index: QModelIndex) -> bool:
-        """
-        This is used to validate a new row generated by SingleItemWindow
-        when the window is done with creating a new row and emits add_item_signal
-        :param index:
-        :return:
-        """
-        item_name_col = self.get_col_number('item_name')
-        new_item_name = index.siblingAtColumn(item_name_col).data()
-        if (new_item_name is not None and
-                new_item_name != "" and
-                new_item_name not in self.model_df['item_name']):
-            logger.debug(f"item_name({new_item_name}) is valid")
-            return True
-        else:
-            logger.debug(f"item_name({new_item_name}) is not valid")
+        """Validate a new row"""
+        if not index.isValid():
             return False
+            
+        row = self._data[index.row()]
+        if not row.item_name:
+            return False
+            
+        # Check for duplicate item names
+        return not any(item.item_name == row.item_name 
+                      for item in self._data 
+                      if item != row)
+
+    def get_user_privilege(self) -> Config.UserPrivilege:
+        """Get user privilege level"""
+        # This should be implemented based on your user management system
+        return Config.UserPrivilege.Admin if self.user_name == "admin" else Config.UserPrivilege.User

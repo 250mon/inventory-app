@@ -5,7 +5,7 @@ from datetime import datetime
 from db.db_apis import DbApi
 import pandas as pd
 from common.d_logger import Logs
-from constants import MAX_TRANSACTION_COUNT
+from config import MAX_TRANSACTION_COUNT
 from common.singleton import Singleton
 from db.models import Base
 from sqlalchemy import select, and_, func

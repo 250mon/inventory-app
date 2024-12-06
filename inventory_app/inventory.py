@@ -17,7 +17,7 @@ from ui.item_widget import ItemWidget
 from ui.sku_widget import SkuWidget
 from ui.tr_widget import TrWidget
 from common.d_logger import Logs
-from constants import ConfigReader, ADMIN_GROUP
+from config import ADMIN_GROUP
 from model.emr_tr_reader import EmrTransactionReader
 from ui.emr_import_widget import ImportWidget
 
@@ -295,14 +295,6 @@ async def main():
     
     window = InventoryWindow()
 
-    # is_test: str = ConfigReader().get_options("Testmode")
-    # if is_test.lower() == "true":
-    #     await window.start_app("test")
-    # elif is_test.lower() == "admin":
-    #     await window.start_app("admin")
-    # else:
-    #     window.login()
-   
     # Run the event loop
     with loop:
         loop.run_until_complete(window.start_app("test"))
