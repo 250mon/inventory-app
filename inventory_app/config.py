@@ -23,6 +23,9 @@ class Config:
     MAX_TRANSACTION_COUNT = int(os.getenv('MAX_TRANSACTION_COUNT'))
     DEFAULT_MIN_QTY = int(os.getenv('DEFAULT_MIN_QTY'))
 
+    # Maximum number of transactions to load/display
+    MAX_TRANSACTION_COUNT = 1000  # Default maximum number of transactions to load
+
     # Row flags
     class RowFlags:
         OriginalRow = 0

@@ -1,31 +1,34 @@
-from PySide6.QtCore import Qt, QModelIndex, Slot, QDate
-from PySide6.QtGui import QColor
-from typing import List, Dict, Optional
+from PySide6.QtCore import Signal
+from sqlalchemy import select, and_, func
+from sqlalchemy.orm import selectinload
+from typing import List, Optional
 from model.sql_model import SQLTableModel
-from model.item_model import ItemModel
-from services.sku_service import SkuService
+from model.base_model import BaseDBModel
+from model.models import SKU, Item
 from config import Config
 from common.d_logger import Logs
-from common.datetime_utils import pydate_to_qdate, qdate_to_pydate
 
 logger = Logs().get_logger("main")
 
-class SkuModel(SQLTableModel):
-    def __init__(self, user_name: str, sku_service: SkuService, item_model: ItemModel):
-        super().__init__()
-        self.user_name = user_name
-        self._service = sku_service
-        self.item_model = item_model
-        self.selected_upper_id = None
-        self.init_params()
-        self.item_model.item_model_changed_signal.connect(self.item_model_changed)
+class SkuModel(SQLTableModel, BaseDBModel):
+    sku_model_changed_signal = Signal(object)
+    PAGE_SIZE = 100  # Number of records to load at once
 
-    def init_params(self):
+    def __init__(self):
+        super().__init__()
+        self._setup_model()
+        self.show_inactive_items = False
+        self._current_page = 0
+        self._total_records = 0
+        self._current_item_id = None
+        self._data = []
+
+    def _setup_model(self):
         """Initialize model parameters"""
         self._headers = [
             'sku_id', 'root_sku', 'item_name', 'sub_name',
             'active', 'sku_qty', 'min_qty', 'expiration_date',
-            'description', 'bit_code', 'sku_name', 'item_id', 'flag'
+            'description', 'bit_code', 'sku_name', 'item_id'
         ]
         self._column_map = {col: idx for idx, col in enumerate(self._headers)}
         
@@ -41,158 +44,202 @@ class SkuModel(SQLTableModel):
             'description': Config.EditLevel.UserModifiable,
             'bit_code': Config.EditLevel.AdminModifiable,
             'sku_name': Config.EditLevel.NotEditable,
-            'item_id': Config.EditLevel.NotEditable,
-            'flag': Config.EditLevel.NotEditable
+            'item_id': Config.EditLevel.NotEditable
         }
 
-    async def load_data(self):
-        """Load SKUs from service"""
-        self._data = await self._service.get_skus(self.selected_upper_id)
+    # CRUD Operations
+    async def create_sku(self, sku_data: dict) -> SKU:
+        """Create a new SKU in the database"""
+        async with self.session() as session:
+            sku = SKU(**sku_data)
+            session.add(sku)
+            await session.flush()
+            await session.refresh(sku)
+            return sku
+
+    async def get_sku(self, sku_id: int) -> Optional[SKU]:
+        """Get a SKU by ID with eager loading"""
+        async with self.session() as session:
+            # Eager load item
+            query = (
+                select(SKU)
+                .join(SKU.item)
+                .options(selectinload(SKU.item))
+                .where(SKU.sku_id == sku_id)
+            )
+            result = await session.execute(query)
+            return result.scalar_one_or_none()
+
+    async def get_all_skus(self, item_id: Optional[int] = None) -> List[SKU]:
+        """Get all SKUs, optionally filtered by item_id"""
+        async with self.session() as session:
+            # Eager load item
+            query = (
+                select(SKU)
+                .join(SKU.item)
+                .options(selectinload(SKU.item))
+            )
+            if not self.show_inactive_items:
+                query = query.where(and_(
+                    SKU.active == True,
+                    Item.active == True
+                ))
+            if item_id:
+                query = query.where(SKU.item_id == item_id)
+            result = await session.execute(query)
+            return result.scalars().all()
+
+    async def update_sku(self, sku_id: int, sku_data: dict) -> Optional[SKU]:
+        """Update an existing SKU"""
+        async with self.session() as session:
+            sku = await session.get(SKU, sku_id)
+            if sku:
+                for key, value in sku_data.items():
+                    setattr(sku, key, value)
+                await session.flush()
+                await session.refresh(sku)
+                return sku
+            return None
+
+    async def delete_sku(self, sku_id: int) -> bool:
+        """Delete a SKU"""
+        async with self.session() as session:
+            sku = await session.get(SKU, sku_id)
+            if sku:
+                await session.delete(sku)
+                return True
+            return False
+
+    # Qt Model Methods
+    async def load_data(self, item_id: Optional[int] = None):
+        """Load SKUs for the Qt model"""
+        self._current_item_id = item_id
+        self._current_page = 0
+        self._total_records = await self.get_total_records(item_id)
+        self._data = await self.get_page(0, item_id)
         self._update_sku_names()
         self.layoutChanged.emit()
+
+    async def load_more(self):
+        """Load next page of data"""
+        if len(self._data) < self._total_records:
+            self._current_page += 1
+            new_data = await self.get_page(self._current_page, self._current_item_id)
+            if new_data:
+                self._data.extend(new_data)
+                self._update_sku_names()
+                self.layoutChanged.emit()
+                return True
+        return False
+
+    def can_load_more(self) -> bool:
+        """Check if more data can be loaded"""
+        return len(self._data) < self._total_records
 
     def _update_sku_names(self):
         """Update SKU names using item names"""
         for sku in self._data:
-            item_name = self.item_model._data[
-                next(i for i, item in enumerate(self.item_model._data) 
-                    if item.item_id == sku.item_id)
-            ].item_name
-            setattr(sku, 'item_name', item_name)
-            setattr(sku, 'sku_name', f"{item_name} {sku.sub_name}".strip())
+            setattr(sku, 'sku_name', f"{sku.item.item_name} {sku.sub_name}".strip())
 
-    def get_default_delegate_info(self) -> List[int]:
-        """Returns column indexes for default delegate"""
-        return [self.get_col_number(c) for c in ['sub_name', 'description', 'bit_code']]
-
-    def get_combobox_delegate_info(self) -> Dict[int, List]:
-        """Returns column indexes and values for combobox delegate"""
-        return {
-            self.get_col_number('active'): ['Y', 'N'],
-        }
-
-    def get_spinbox_delegate_info(self) -> Dict[int, List]:
-        """Returns column indexes and ranges for spinbox delegate"""
-        return {
-            self.get_col_number('min_qty'): [0, 1000],
-        }
-
-    def data(self, index: QModelIndex, role=Qt.DisplayRole) -> object:
-        if not index.isValid():
-            return None
-
-        row = self._data[index.row()]
-        col_name = self.get_col_name(index.column())
-
-        if role == Qt.DisplayRole or role == Qt.EditRole or role == self.SortRole:
-            if col_name in ['sku_id', 'root_sku', 'item_id', 'sku_qty', 'min_qty']:
-                return getattr(row, col_name)
-            elif col_name == 'active':
-                return 'Y' if getattr(row, col_name) else 'N'
-            elif col_name == 'expiration_date':
-                return pydate_to_qdate(getattr(row, col_name))
-            else:
-                return str(getattr(row, col_name))
-
-        elif role == Qt.TextAlignmentRole:
-            return Qt.AlignLeft if col_name == 'description' else Qt.AlignCenter
-
-        return None
-
-    def setData(self, index: QModelIndex, value: object, role=Qt.EditRole) -> bool:
-        if not index.isValid() or role != Qt.EditRole:
-            return False
-
-        row = self._data[index.row()]
-        col_name = self.get_col_name(index.column())
-
-        try:
-            if col_name == 'active':
-                setattr(row, col_name, value == 'Y')
-            elif col_name == 'expiration_date':
-                if isinstance(value, QDate):
-                    value = qdate_to_pydate(value)
-                setattr(row, col_name, value)
-            elif col_name == 'root_sku':
-                # Validate root_sku
-                if not self._validate_root_sku(value, row.item_id):
-                    return False
-                setattr(row, col_name, value)
-            elif col_name == 'sub_name':
-                setattr(row, col_name, value)
-                self._update_sku_names()  # Update sku_name when sub_name changes
-            else:
-                setattr(row, col_name, value)
-
-            self.dataChanged.emit(index, index)
-            return True
-
-        except Exception as e:
-            logger.error(f"Error setting data: {e}")
-            return False
-
-    def _validate_root_sku(self, root_sku: int, item_id: int) -> bool:
-        """Validate root SKU belongs to same item"""
+    async def validate_sku(self, root_sku: int, item_id: int) -> bool:
+        """Validate SKU data"""
         if root_sku == 0:
-            return True
-        root_row = next((sku for sku in self._data if sku.sku_id == root_sku), None)
-        return root_row is not None and root_row.item_id == item_id
+            return True  # No root SKU to validate
 
-    def set_upper_model_id(self, item_id: Optional[int]):
-        """Set selected item ID for filtering"""
-        self.selected_upper_id = item_id
-        logger.debug(f"item_id({self.selected_upper_id}) is set")
+        async with self.session() as session:
+            # Validate root SKU exists and belongs to the same item in a single query
+            query = select(SKU).where(
+                SKU.sku_id == root_sku,
+                SKU.item_id == item_id
+            )
+            result = await session.execute(query)
+            root = result.scalar_one_or_none()
 
-    def is_sku_qty_correct(self, sku_id: int, sku_qty: int) -> bool:
-        """Check if SKU quantity is correct for root SKU"""
-        sub_skus = [sku for sku in self._data if sku.root_sku == sku_id]
-        if not sub_skus:
-            return True
-        return sku_qty == sum(sku.sku_qty for sku in sub_skus)
+            return root is not None
 
-    def is_active_row(self, index: QModelIndex) -> bool:
-        if not index.isValid():
-            return False
-        row = self._data[index.row()]
-        item_active = self.item_model.is_active_row(
-            next(i for i, item in enumerate(self.item_model._data) 
-                if item.item_id == row.item_id)
+    def create_empty_sku(self) -> SKU:
+        """Create a new empty SKU object"""
+        return SKU(
+            sku_id=0,  # Temporary ID
+            root_sku=0,
+            active=True,
+            sub_name='',
+            sku_qty=0,
+            min_qty=Config.DEFAULT_MIN_QTY,
+            item_id=0,
+            description='',
+            bit_code=''
         )
-        return item_active and row.active
 
-    def cell_color(self, index: QModelIndex) -> QColor:
-        if not index.isValid():
-            return QColor(Qt.white)
+    def is_active_row(self, index: int) -> bool:
+        """Check if row is active"""
+        if 0 <= index < len(self._data):
+            return bool(self._data[index].active and self._data[index].item.active)
+        return False
 
-        row = self._data[index.row()]
-        col_name = self.get_col_name(index.column())
+    async def is_sku_qty_correct(self, sku_id: int, sku_qty: int) -> bool:
+        """Check if SKU quantity is correct for root SKU"""
+        async with self.session() as session:
+            # Get all sub-SKUs directly from database
+            result = await session.execute(
+                select(SKU).where(SKU.root_sku == sku_id)
+            )
+            sub_skus = result.scalars().all()
+            
+            if not sub_skus:
+                return True
+                
+            return sku_qty == sum(sku.sku_qty for sku in sub_skus)
 
-        if col_name == "sku_qty":
-            if row.root_sku == 0 and not self.is_sku_qty_correct(row.sku_id, row.sku_qty):
-                return QColor(255, 180, 150, 50)
-            elif row.sku_qty < row.min_qty:
-                return QColor(Qt.red)
+    def toggle_show_inactive(self):
+        """Toggle showing inactive items"""
+        self.show_inactive_items = not self.show_inactive_items
 
-        return super().cell_color(index)
+    async def get_page(self, page: int, item_id: Optional[int] = None) -> List[SKU]:
+        """Get a page of SKUs"""
+        async with self.session() as session:
+            # Eager load item
+            query = (
+                select(SKU)
+                .join(SKU.item)
+                .options(selectinload(SKU.item))
+            )
+            
+            if not self.show_inactive_items:
+                query = query.where(and_(
+                    SKU.active == True,
+                    Item.active == True
+                ))
+            
+            if item_id:
+                query = query.where(SKU.item_id == item_id)
+            
+            # Add ordering to ensure consistent pagination
+            query = query.order_by(SKU.sku_id)
+            
+            # Add pagination
+            query = query.offset(page * self.PAGE_SIZE).limit(self.PAGE_SIZE)
+            
+            result = await session.execute(query)
+            return result.scalars().all()
 
-    async def save_changes(self):
-        """Save changes to database"""
-        for row in self._data:
-            if getattr(row, 'flag', None) == Config.RowFlags.NewRow:
-                # For new SKUs, include all fields except sku_id
-                sku_data = self.get_clean_data(row, exclude_fields=['sku_id'])
-                await self._service.create_sku(sku_data)
-            elif getattr(row, 'flag', None) == Config.RowFlags.ChangedRow:
-                # For updates, exclude unchangeable fields
-                sku_data = self.get_clean_data(row, exclude_fields=['sku_id', 'item_id'])
-                await self._service.update_sku(row.sku_id, sku_data)
-            elif getattr(row, 'flag', None) == Config.RowFlags.DeletedRow:
-                await self._service.delete_sku(row.sku_id)
+    async def get_total_records(self, item_id: Optional[int] = None) -> int:
+        """Get total number of records"""
+        async with self.session() as session:
+            query = select(SKU)
 
-        await self.load_data()
+            if not self.show_inactive_items:
+                query = query.join(Item).where(and_(
+                    SKU.active == True,
+                    Item.active == True
+                ))
 
-    @Slot(object)
-    def item_model_changed(self, item_ids: List):
-        """Handle changes in item model"""
-        self._update_sku_names()
-        self.layoutChanged.emit()
+            if item_id:
+                query = query.where(SKU.item_id == item_id)
+
+            # Convert the query to a subquery to avoid the deprecation warning
+            subquery = query.subquery()
+
+            # Use the subquery in the select statement
+            result = await session.execute(select(func.count()).select_from(subquery))
+            return result.scalar()

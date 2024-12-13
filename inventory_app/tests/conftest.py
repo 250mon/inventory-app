@@ -4,20 +4,21 @@ import asyncio
 from qasync import QEventLoop
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from db.models import Base, Category, Item, User
+from model.models import Base, Category, Item, User
 import os
+from model.base_model import BaseDBModel
 
 TEST_DB_URL = os.getenv(
     'TEST_DB_URL',
     "postgresql+asyncpg://postgres:123abc@192.168.11.14:5433/danaul_inventory"
 )
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create event loop for async tests"""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def setup_database():
+    """Setup test database before tests and cleanup after"""
+    await BaseDBModel.create_tables()
+    yield
+    await BaseDBModel.drop_tables()
 
 @pytest.fixture
 async def db_session():
